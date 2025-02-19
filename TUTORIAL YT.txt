@@ -1,0 +1,13 @@
+httpsyoutu.bebeGvfiRu3y0si=OA-vEwUL1nEV303l
+
+https://www.wolfpress.co/como-instalar-selenium-con-chromedriver/
+
+https://googlechromelabs.github.io/chrome-for-testing/#stable
+
+cd C:\chromedriver
+
+python whatsapp_bot.py
+python procesar_pagos.py
+
+cd C:\Ferreteria_bot
+Python bot_whatsapp.py
