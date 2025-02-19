@@ -1,4 +1,7 @@
-import win32com.client
+try:
+    import win32com.client
+except ImportError:
+    print("win32com no está disponible en este sistema operativo.")
 import time
 import os
 import pandas as pd
@@ -10,14 +13,18 @@ from selenium.webdriver.common.keys import Keys
 EXCEL_FILE = "pagos_inquilinos.xlsx"
 
 def leer_correos():
-    outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
-    bandeja_entrada = outlook.GetDefaultFolder(6)
-    mensajes = bandeja_entrada.Items
-    
-    for mensaje in mensajes:
-        if mensaje.SenderEmailAddress == "notificaciones@bancoatlas.com.py" and "transferencia" in mensaje.Subject.lower():
-            return extraer_datos(mensaje.Body)
-    return None
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+        bandeja_entrada = outlook.GetDefaultFolder(6)
+        mensajes = bandeja_entrada.Items
+
+        for mensaje in mensajes:
+            if mensaje.SenderEmailAddress == "notificaciones@bancoatlas.com.py" and "transferencia" in mensaje.Subject.lower():
+                return extraer_datos(mensaje.Body)
+    except NameError:
+        print("No se puede acceder a Outlook en este sistema.")
+        return None
+
 
 def extraer_datos(texto):
     lineas = texto.split("\n")
