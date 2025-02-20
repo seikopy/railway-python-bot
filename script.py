@@ -4,6 +4,7 @@ from selenium.webdriver.common.keys import Keys
 import time
 import os
 import pandas as pd
+from datetime import datetime
 
 # Verificar si win32com está disponible
 try:
@@ -21,10 +22,18 @@ WHATSAPP_GROUP = "VENUS TRANSFERENCIAS"
 # Número de cuenta de la peluquería
 CUENTA_PELUQUERIA = "1272612"
 
+# Archivo de logs
+LOG_FILE = "logs.txt"
+
+def escribir_log(mensaje):
+    """Guarda un mensaje en el archivo de logs con la fecha y hora."""
+    with open(LOG_FILE, "a", encoding="utf-8") as log:
+        log.write(f"{datetime.now()} - {mensaje}\n")
+
 def leer_correos():
     """Lee los correos en la carpeta 'ATLAS' y procesa las transferencias"""
     if not win32com:
-        print("No se puede acceder a Outlook en este sistema.")
+        escribir_log("Error: No se puede acceder a Outlook en este sistema.")
         return None
 
     outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
@@ -35,7 +44,7 @@ def leer_correos():
         folder_atlas = folder_bancos.Folders.Item("ATLAS")
         mensajes = folder_atlas.Items
     except Exception as e:
-        print(f"Error al acceder a la carpeta: {e}")
+        escribir_log(f"Error al acceder a la carpeta: {e}")
         return None
 
     for mensaje in mensajes:
@@ -43,8 +52,10 @@ def leer_correos():
             cuerpo = mensaje.Body
             # **Verificamos que el correo contenga la cuenta de la peluquería**
             if f"Cuenta Corriente: {CUENTA_PELUQUERIA}" in cuerpo:
+                escribir_log("✅ Transferencia detectada. Procesando datos...")
                 return extraer_datos(cuerpo)
-    
+
+    escribir_log("⚠️ No se encontró ninguna transferencia nueva.")
     return None
 
 def extraer_datos(texto):
@@ -66,12 +77,17 @@ def extraer_datos(texto):
         elif "Nro. Operación SIPAP:" in linea:
             datos["comprobante"] = linea.split(":")[1].strip()
 
-    return datos if len(datos) == 6 else None
+    if len(datos) == 6:
+        escribir_log(f"📄 Datos extraídos correctamente: {datos}")
+        return datos
+    else:
+        escribir_log("⚠️ Error: Datos incompletos en la transferencia.")
+        return None
 
 def enviar_whatsapp(datos):
     """Envía el mensaje de transferencia al grupo de WhatsApp"""
     if not datos:
-        print("No hay datos de transferencia para enviar.")
+        escribir_log("⚠️ No hay datos de transferencia para enviar.")
         return
 
     mensaje = f"""✅ *RECIBIDO TRANSFERENCIA* ✅
@@ -100,17 +116,19 @@ Reaccionar con 👍 este mensaje la sucursal que corresponde esta transferencia.
         message_box.send_keys(mensaje)
         message_box.send_keys(Keys.ENTER)
         time.sleep(2)
-        print("Mensaje enviado correctamente.")
+
+        escribir_log("✅ Mensaje enviado correctamente a WhatsApp.")
 
     except Exception as e:
-        print(f"Error al enviar el mensaje: {e}")
+        escribir_log(f"⚠️ Error al enviar el mensaje a WhatsApp: {e}")
 
     finally:
         driver.quit()
 
 if __name__ == "__main__":
+    escribir_log("🔄 Iniciando proceso de detección de transferencias...")
     datos_transferencia = leer_correos()
     if datos_transferencia:
         enviar_whatsapp(datos_transferencia)
     else:
-        print("No se encontraron transferencias para procesar.")
+        escribir_log("🚫 No se enviaron mensajes a WhatsApp.")
