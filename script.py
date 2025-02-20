@@ -2,93 +2,119 @@ import os
 import imaplib
 import email
 from email.header import decode_header
-from dotenv import load_dotenv
 import time
+from dotenv import load_dotenv
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
+# Cargar variables de entorno
 load_dotenv()
 
-# Credenciales de Outlook
-OUTLOOK_EMAIL = os.getenv("OUTLOOK_EMAIL")
-OUTLOOK_PASSWORD = os.getenv("OUTLOOK_PASSWORD")
+# Configuración de credenciales
+EMAIL_USER = os.getenv("OUTLOOK_USER")
+EMAIL_PASS = os.getenv("OUTLOOK_PASSWORD")
 IMAP_SERVER = "outlook.office365.com"
-IMAP_PORT = 993
-
-# Configuración del grupo de WhatsApp
+FOLDER_PATH = "BANCOS - BANCARD OTROS/ATLAS"
 WHATSAPP_GROUP = "VENUS TRANSFERENCIAS"
 
-# Conectar a Outlook
-try:
-    mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-    mail.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
-    mail.select("INBOX/BANCOS - BANCARD OTROS/ATLAS")
-    print("Conectado a Outlook con éxito.")
-except Exception as e:
-    print(f"Error al conectar con Outlook: {e}")
-    mail = None
+# Conectar a Outlook vía IMAP
+def conectar_outlook():
+    try:
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.select(FOLDER_PATH)
+        return mail
+    except Exception as e:
+        print("Error al conectar con Outlook:", str(e))
+        return None
 
-# Buscar correos de transferencias
-if mail:
+# Buscar correos relevantes
+def buscar_correos():
+    mail = conectar_outlook()
+    if not mail:
+        print("No se pudo conectar a Outlook.")
+        return []
+    
     try:
         status, messages = mail.search(None, 'ALL')
-        email_ids = messages[0].split()
-        print(f"Correos encontrados: {len(email_ids)}")
-
-        for email_id in email_ids[-5:]:  # Procesar los últimos 5 correos
-            status, msg_data = mail.fetch(email_id, "(RFC822)")
-            for response_part in msg_data:
+        correos = messages[0].split()
+        resultados = []
+        
+        for num in correos[-10:]:  # Revisar los últimos 10 correos
+            status, data = mail.fetch(num, '(RFC822)')
+            for response_part in data:
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
                     subject, encoding = decode_header(msg["Subject"])[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding or "utf-8")
-                    print(f"Asunto del correo: {subject}")
-
-                    # Filtrar solo transferencias
-                    if "TRANSFERENCIAS INTERBANCARIAS" in subject.upper():
-                        body = ""
+                    if isinstance(subject, bytes) and encoding:
+                        subject = subject.decode(encoding)
+                    
+                    if "TRANSFERENCIAS" in subject.upper() or "BANCO ATLAS - AVISO DE TRANSFERENCIAS INTERBANCARIAS" in subject.upper():
+                        cuerpo = ""
                         if msg.is_multipart():
                             for part in msg.walk():
-                                content_type = part.get_content_type()
-                                if "plain" in content_type:
-                                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                                if part.get_content_type() == "text/plain":
+                                    cuerpo = part.get_payload(decode=True).decode()
                                     break
                         else:
-                            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-
-                        # Extraer información relevante
-                        cuenta_corriente = "1272612"
-                        if cuenta_corriente in body:
-                            print("Correo corresponde a la cuenta de la peluquería.")
-                            datos = {
-                                "Enviado por": "",
-                                "Monto Crédito": "",
-                                "Banco Origen": "",
-                                "Comprobante": ""
-                            }
-                            for line in body.split("\n"):
-                                if "Enviado por:" in line:
-                                    datos["Enviado por"] = line.split(":", 1)[1].strip()
-                                elif "Monto Crédito:" in line:
-                                    datos["Monto Crédito"] = line.split(":", 1)[1].strip()
-                                elif "Banco Origen:" in line:
-                                    datos["Banco Origen"] = line.split(":", 1)[1].strip()
-                                elif "Concepto:" in line:
-                                    datos["Comprobante"] = line.split("Ref:")[1].strip()
-                            
-                            mensaje_whatsapp = (f"*RECIBIDO TRANSFERENCIA*\n"
-                                                f"Enviado por: {datos['Enviado por']}\n"
-                                                f"Monto Crédito: {datos['Monto Crédito']}\n"
-                                                f"Banco Origen: {datos['Banco Origen']}\n"
-                                                f"Comprobante: {datos['Comprobante']}\n\n"
-                                                f"Reaccionar con 👍 este mensaje, la sucursal que corresponde esta transferencia.")
-                            
-                            print("Mensaje a enviar:", mensaje_whatsapp)
-                            # Aquí se enviaría el mensaje a WhatsApp
-                        else:
-                            print("Correo no corresponde a la cuenta de la peluquería. Ignorando.")
+                            cuerpo = msg.get_payload(decode=True).decode()
+                        
+                        if "Cuenta Corriente: 1272612" in cuerpo:
+                            resultados.append((subject, cuerpo))
+        return resultados
     except Exception as e:
-        print(f"Error al procesar correos: {e}")
-    finally:
-        mail.logout()
-else:
-    print("No se pudo conectar a Outlook.")
+        print("Error al buscar correos:", str(e))
+        return []
+
+# Extraer datos relevantes
+def extraer_datos(texto):
+    lineas = texto.split("\n")
+    datos = {}
+    
+    for linea in lineas:
+        if "Enviado por:" in linea:
+            datos["Enviado por"] = linea.split(":")[-1].strip()
+        elif "Monto Crédito:" in linea:
+            datos["Monto"] = linea.split(":")[-1].strip()
+        elif "Banco Origen:" in linea:
+            datos["Banco Origen"] = linea.split(":")[-1].strip()
+        elif "Nro. Operación SIPAP:" in linea:
+            datos["Comprobante"] = linea.split(":")[-1].strip()
+    return datos
+
+# Enviar mensaje a WhatsApp
+def enviar_whatsapp(datos):
+    mensaje = (f"*RECIBIDO TRANSFERENCIA*\n"
+               f"Enviado por: {datos.get('Enviado por', 'N/A')}\n"
+               f"Monto: {datos.get('Monto', 'N/A')}\n"
+               f"Banco Origen: {datos.get('Banco Origen', 'N/A')}\n"
+               f"Comprobante: {datos.get('Comprobante', 'N/A')}\n\n"
+               "Reaccionar con 👍 este mensaje, la sucursal que corresponde esta transferencia.")
+    
+    driver = webdriver.Chrome()
+    driver.get("https://web.whatsapp.com")
+    input("Escanea el código QR y presiona Enter para continuar...")
+    
+    time.sleep(10)
+    
+    search_box = driver.find_element(By.XPATH, "//div[contains(@class,'copyable-text selectable-text')]")
+    search_box.send_keys(WHATSAPP_GROUP + Keys.ENTER)
+    time.sleep(5)
+    
+    message_box = driver.find_elements(By.XPATH, "//div[contains(@class,'copyable-text selectable-text')]")[-1]
+    message_box.send_keys(mensaje + Keys.ENTER)
+    
+    time.sleep(5)
+    driver.quit()
+
+# Ejecutar script
+def main():
+    correos = buscar_correos()
+    for _, cuerpo in correos:
+        datos = extraer_datos(cuerpo)
+        enviar_whatsapp(datos)
+    print("Proceso completado.")
+
+if __name__ == "__main__":
+    main()
